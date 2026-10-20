@@ -1,0 +1,6 @@
+{
+  "name": "Dock Focus Tracker",
+  "description": "Hides or shows Dash to Dock based on window focus.",
+  "uuid": "dock-autohide@harsh.patel",
+  "shell-version": ["46"]
+}

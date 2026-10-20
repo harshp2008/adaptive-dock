@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.adaptive-dock" path="/org/gnome/shell/extensions/adaptive-dock/">
+    <key name="toggle-dock" type="as">
+      <default><![CDATA[['<Shift><Super>d']]]></default>
+      <summary>Toggle dock auto-hide</summary>
+      <description>Toggles dock intellihide and remembers the choice for the current workspace or session.</description>
+    </key>
+    <key name="remember-session-state" type="b">
+      <default>true</default>
+      <summary>Remember dock state for current session</summary>
+      <description>When true, toggling the dock via shortcut while an app is focused remembers that state for the current session.</description>
+    </key>
+    <key name="remember-per-window" type="b">
+      <default>false</default>
+      <summary>Isolate state per window</summary>
+      <description>When true, manual session dock overrides apply to the active window instead of all windows of the application.</description>
+    </key>
+    <key name="workspace-list" type="as">
+      <default>[]</default>
+      <summary>Active workspace list</summary>
+      <description>List of active and dynamically available workspaces synced from GNOME Shell.</description>
+    </key>
+    <key name="edge-hover-reveal" type="b">
+      <default>false</default>
+      <summary>Reveal dock on mouse hover at screen edge</summary>
+      <description>When true, hovering or pushing the mouse at the screen edge reveals the dock.</description>
+    </key>
+  </schema>
+</schemalist>

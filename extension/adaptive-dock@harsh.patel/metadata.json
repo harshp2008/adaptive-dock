@@ -1,0 +1,8 @@
+{
+  "name": "Adaptive Dock",
+  "description": "Intelligently controls Dash to Dock visibility based on window focus, active applications, and workspaces.",
+  "uuid": "adaptive-dock@harsh.patel",
+  "settings-schema": "org.gnome.shell.extensions.adaptive-dock",
+  "shell-version": ["46", "47", "48", "49", "50"],
+  "url": "https://github.com/harshp2008/adaptive-dock"
+}
