@@ -52,6 +52,8 @@ export default class AdaptiveDock extends Extension {
             Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW, () => this._toggleWorkspace());
 
         this._edgeRevealId = this._kb.connect('changed::edge-hover-reveal', () => this._apply(true));
+        this._notifOffsetId = this._kb.connect('changed::notification-vertical-offset', () => this._updateOsdOffset());
+        this._updateOsdOffset();
         this._addWsId = this._kb.connect('changed::request-add-workspace', () => {
             try {
                 if (global.workspace_manager) {
@@ -82,6 +84,7 @@ export default class AdaptiveDock extends Extension {
             Main.wm.removeKeybinding('toggle-dock');
             Main.wm.removeKeybinding('toggle-workspace-dock');
             if (this._edgeRevealId) this._kb.disconnect(this._edgeRevealId);
+            if (this._notifOffsetId) this._kb.disconnect(this._notifOffsetId);
             if (this._addWsId) this._kb.disconnect(this._addWsId);
             this._kb = null;
         }
@@ -122,7 +125,7 @@ export default class AdaptiveDock extends Extension {
         }
 
         this._focusId = this._wsActiveId = this._wsCountId = this._wsReorderId = null;
-        this._winTrackId = this._wmNamesId = this._monId = this._monitor = this._edgeRevealId = null;
+        this._winTrackId = this._wmNamesId = this._monId = this._monitor = this._edgeRevealId = this._notifOffsetId = null;
         this._settings = this._wm = this._tracker = this._appStates = null;
         this._sessionAppStates = this._sessionWindowStates = this._sessionWorkspaceStates = this._windowSignals = null;
         this._lastKey = null;
@@ -264,7 +267,7 @@ export default class AdaptiveDock extends Extension {
         return this._readText(GLib.build_filenamev([WS_DIR, `${name}.state`]));
     }
 
-    _showOsd(iconName, label) {
+    _updateOsdOffset() {
         try {
             const offset = this._kb ? this._kb.get_int('notification-vertical-offset') : 80;
             if (Main.osdWindowManager?._osdWindows) {
@@ -276,9 +279,35 @@ export default class AdaptiveDock extends Extension {
                     }
                 }
             }
-            const icon = Gio.Icon.new_for_string(iconName);
-            if (Main.osdWindowManager?.showAll) {
+        } catch (e) {
+            console.warn(`Adaptive Dock: failed to update OSD offset: ${e.message}`);
+        }
+    }
+
+    _showOsd(iconName, label) {
+        try {
+            this._updateOsdOffset();
+
+            let icon = null;
+            if (iconName) {
+                try {
+                    icon = Gio.Icon.new_for_string(iconName);
+                } catch (_e) {
+                    try {
+                        icon = new Gio.ThemedIcon({name: iconName});
+                    } catch (_e2) {}
+                }
+            }
+            if (!icon) {
+                icon = Gio.Icon.new_for_string('user-desktop-symbolic');
+            }
+
+            if (typeof Main.osdWindowManager?.showAll === 'function') {
                 Main.osdWindowManager.showAll(icon, label, null, null);
+            } else if (typeof Main.osdWindowManager?.show === 'function') {
+                Main.osdWindowManager.show(-1, icon, label, null, null);
+            } else {
+                console.warn('Adaptive Dock: No supported OSD display method found on Main.osdWindowManager');
             }
         } catch (e) {
             console.warn(`Adaptive Dock: OSD display failed: ${e.message}`);
