@@ -4,5 +4,6 @@
   "uuid": "adaptive-dock@harsh.patel",
   "settings-schema": "org.gnome.shell.extensions.adaptive-dock",
   "shell-version": ["46", "47", "48", "49", "50"],
-  "url": "https://github.com/harshp2008/adaptive-dock"
+  "url": "https://github.com/harshp2008/Adaptive-Dock",
+  "version": 1
 }

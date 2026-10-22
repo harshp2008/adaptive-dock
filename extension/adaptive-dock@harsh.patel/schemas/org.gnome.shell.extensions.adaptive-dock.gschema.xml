@@ -3,8 +3,13 @@
   <schema id="org.gnome.shell.extensions.adaptive-dock" path="/org/gnome/shell/extensions/adaptive-dock/">
     <key name="toggle-dock" type="as">
       <default><![CDATA[['<Shift><Super>d']]]></default>
-      <summary>Toggle dock auto-hide</summary>
-      <description>Toggles dock intellihide and remembers the choice for the current workspace or session.</description>
+      <summary>Toggle active app dock visibility</summary>
+      <description>Toggles dock visibility and remembers the choice for the active app/window during this session.</description>
+    </key>
+    <key name="toggle-workspace-dock" type="as">
+      <default><![CDATA[['<Shift><Super>w']]]></default>
+      <summary>Toggle workspace dock baseline</summary>
+      <description>Toggles the dock visibility baseline for the active workspace during this session.</description>
     </key>
     <key name="remember-session-state" type="b">
       <default>true</default>
@@ -16,6 +21,21 @@
       <summary>Isolate state per window</summary>
       <description>When true, manual session dock overrides apply to the active window instead of all windows of the application.</description>
     </key>
+    <key name="per-window-apps" type="as">
+      <default>[]</default>
+      <summary>Apps with per-window isolation forced</summary>
+      <description>List of application desktop IDs that isolate shortcut dock toggles per window.</description>
+    </key>
+    <key name="per-app-apps" type="as">
+      <default>[]</default>
+      <summary>Apps with per-application isolation forced</summary>
+      <description>List of application desktop IDs that apply shortcut dock toggles to all windows of the application.</description>
+    </key>
+    <key name="request-add-workspace" type="i">
+      <default>0</default>
+      <summary>Signal to create a new workspace in GNOME Shell</summary>
+      <description>Incremented by preferences to request GNOME Shell to append a new workspace.</description>
+    </key>
     <key name="workspace-list" type="as">
       <default>[]</default>
       <summary>Active workspace list</summary>
@@ -25,6 +45,21 @@
       <default>false</default>
       <summary>Reveal dock on mouse hover at screen edge</summary>
       <description>When true, hovering or pushing the mouse at the screen edge reveals the dock.</description>
+    </key>
+    <key name="notify-on-app-toggle" type="b">
+      <default>true</default>
+      <summary>Show notification on app dock toggle</summary>
+      <description>Show on-screen display notification when toggling active app dock visibility.</description>
+    </key>
+    <key name="notify-on-workspace-toggle" type="b">
+      <default>true</default>
+      <summary>Show notification on workspace dock toggle</summary>
+      <description>Show on-screen display notification when toggling workspace dock baseline.</description>
+    </key>
+    <key name="notification-vertical-offset" type="i">
+      <default>80</default>
+      <summary>Notification bottom offset (px)</summary>
+      <description>Vertical distance in pixels to elevate the notification above bottom docks.</description>
     </key>
   </schema>
 </schemalist>

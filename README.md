@@ -45,10 +45,9 @@ Designed as an intelligent companion for **[Dash to Dock](https://github.com/mic
 
 ## Features
 
-- 🎯 **Per-Application Rules**: Choose whether the dock is visible (window dodge) or completely hidden for any individual app installed on your system.
-- 🗂️ **Per-Workspace Rules**: Set fallback dock behavior per workspace (e.g. Workspace 1 defaults to visible dock, Workspace 2 defaults to hidden dock).
-- 🧠 **Session Memory & Overrides**: Hit a quick shortcut to temporarily override the dock state for the active app during your session without overwriting your persistent rules.
-- 🪟 **Per-Window Isolation**: Optionally isolate manual session overrides to the specific active window instead of all windows of the application.
+- 🎯 **Per-Application Rules**: Choose whether the dock is visible (window dodge), completely hidden, or set to **Bypass** (preserves whatever dock state the previous app had—ideal for floating utilities like Win11Clip, screenshot tools, and popup launchers).
+- 🗂️ **Per-Workspace Rules & In-Menu Renaming**: Set fallback dock behavior per workspace, rename workspaces directly in the preferences menu (syncs system-wide with GNOME), and use the `+` button to preset and append new workspaces.
+- 🧠 **Session Memory & Granular Isolation**: Hit a quick shortcut to temporarily override dock visibility during your session. Choose a global default (per-app or per-window) and set custom exceptions for individual apps (e.g. isolate Gemini or Terminal per-window while keeping other apps per-application).
 - 🖐️ **Screen Edge Reveal Control**: Prevent accidental dock popups by turning edge-hover reveal off, or tune pressure thresholds, animations, and reveal delays.
 - 🔄 **Real-Time Workspace Sync**: Dynamically mirrors workspace creation, deletion, reordering, and custom names from GNOME Shell in real time ("Used + 1" dynamic layout).
 - ⌨️ **Interactive Shortcut Recorder**: Rebind the global toggle shortcut via a native Libadwaita modal recorder.
@@ -58,10 +57,11 @@ Designed as an intelligent companion for **[Dash to Dock](https://github.com/mic
 
 ## How It Works
 
-Adaptive Dock hooks directly into GNOME Shell's window tracker and workspace manager. When you switch windows or switch workspaces, Adaptive Dock evaluates the current context and adjusts Dash to Dock / Ubuntu Dock's `intellihide` properties.
+Adaptive Dock hooks directly into GNOME Shell's window tracker and workspace manager. When you switch windows or switch workspaces, Adaptive Dock evaluates the current context and adjusts Dash to Dock / Ubuntu Dock's Intelligent Autohide properties:
 
-- **Hide dock**: Disables `intellihide` while forcing `dock-fixed=false`. The dock remains hidden and out of the way.
-- **Show dock**: Enables `intellihide` so the dock is displayed and automatically dodges active windows when they overlap.
+- **Show dock**: Enables "Dodge windows" (`intellihide=true`) while keeping Intelligent Autohide and Autohide active (`dock-fixed=false`, `autohide=true`), making the dock visible.
+- **Hide dock**: Disables "Dodge windows" (`intellihide=false`) while keeping Autohide active, cleanly hiding the dock out of view.
+- **Bypass**: Preserves the dock visibility state inherited from the previously focused window/workspace without modification. Essential for floating clipboard history managers (like Win11Clip), quick launchers, or HUD overlays that shouldn't disrupt dock state.
 
 ### Priority Hierarchy
 
@@ -69,22 +69,32 @@ When a window is focused, Adaptive Dock evaluates visibility using the following
 
 ```text
 ┌────────────────────────────────────────────────────────┐
+│  0. Bypass Rule (Freezes & preserves current state)    │
+└───────────────────────────┬────────────────────────────┘
+                            │ (not a bypass app)
+                            ▼
+┌────────────────────────────────────────────────────────┐
 │  1. In-Memory Session Override (Window or App level)  │
 └───────────────────────────┬────────────────────────────┘
-                            │ (no session override)
+                            │ (no app/window session override)
                             ▼
 ┌────────────────────────────────────────────────────────┐
 │  2. Persistent Application Rule (dock-app-states.json) │
 └───────────────────────────┬────────────────────────────┘
-                            │ (no app-specific rule)
+                            │ (app is Default)
                             ▼
 ┌────────────────────────────────────────────────────────┐
-│  3. Persistent Workspace Rule (<workspace>.state)      │
+│  3. In-Memory Workspace Session Baseline (from toggle) │
 └───────────────────────────┬────────────────────────────┘
-                            │ (no workspace rule)
+                            │ (no in-memory workspace toggle)
                             ▼
 ┌────────────────────────────────────────────────────────┐
-│  4. Default Fallback (Show dock with window dodge)     │
+│  4. Persistent Workspace Rule (<workspace>.state)      │
+└───────────────────────────┬────────────────────────────┘
+                            │ (no workspace rule file)
+                            ▼
+┌────────────────────────────────────────────────────────┐
+│  5. Default Fallback (Show dock)                       │
 └────────────────────────────────────────────────────────┘
 ```
 
@@ -99,16 +109,23 @@ In standard Dash to Dock, moving the cursor near the edge of the screen can acci
 - **Hide timeout & Show timeout**: Control delays before showing or dismissing the dock.
 - **Fullscreen & Urgent Notifications**: Dedicated switches to permit dock reveals during fullscreen video/gaming or when applications flag urgency.
 
-### Session State Memory
+### Session State Memory & Dual-Scope Shortcuts
 
-Using the toggle shortcut (`Shift+Super+D` by default) allows on-the-fly toggling:
+Adaptive Dock provides dedicated shortcuts to control dock visibility at both the application and workspace levels with immediate on-screen (OSD) feedback:
 
-- **Remember manual dock state in current session** (Enabled by default): If you toggle the dock while working in an app, Adaptive Dock remembers your preference across window and workspace switches until you log out—without changing your saved preferences file.
-- **Isolate state per window**: Enable this in the Apps tab to apply toggles strictly to the active window instance rather than across all instances of that program.
+- **Toggle Active App / Window** (`Shift+Super+D` by default): Temporarily toggles dock visibility for the focused application (or specific window if per-window isolation is active). Navigating to other apps leaves those apps on their own rules.
+- **Toggle Workspace Baseline** (`Shift+Super+W` by default): Temporarily toggles the dock visibility baseline for the active workspace. All applications set to `Default` on this workspace immediately adopt this new baseline.
+- **Session Memory Guarantee**: All manual overrides live strictly in memory and reset cleanly upon logging out or rebooting—never modifying your persistent preferences files on disk.
+- **Global Window Isolation Default**: Set whether shortcut toggles apply to the entire application or strictly to the active window by default.
+- **App Isolation Overrides & Exceptions**: Give specific apps custom isolation rules! For example, keep window isolation OFF globally (so toggling a browser affects all browser windows), but force **Per-Window isolation** for Gemini, terminal windows, or web apps. Exceptions can be toggled with a single click in the app list or managed centrally in the **App Isolation Overrides** expander.
 
-### Dynamic Workspace Synchronization
+### Dynamic Workspace Synchronization & Management
 
-The **Workspaces** tab dynamically watches GNOME Shell's workspace manager. Whenever workspaces are added, removed, or re-labeled, the list refreshes automatically following the **"Used + 1"** heuristic (preserving at least 4 available slots and always providing at least one spare workspace).
+The **Workspaces** tab dynamically watches GNOME Shell's workspace manager:
+
+- **Preset & Append Workspaces (`+` Button)**: Click the `+` button in the group header to create and preset a new workspace with a custom name and initial dock behavior.
+- **In-Menu Workspace Renaming (✏️)**: Click the edit pencil icon next to any workspace to rename it directly inside the settings UI. Changes instantly update GNOME Mutter system-wide and automatically migrate your saved dock preferences (`.state` files).
+- **Dynamic "Used + 1" Sync**: The workspace list automatically mirrors active and named workspaces from GNOME Shell, ensuring at least 4 slots and always offering at least one spare workspace.
 
 ---
 
@@ -124,13 +141,21 @@ The **Workspaces** tab dynamically watches GNOME Shell's workspace manager. When
 
 ## Installation
 
-### Quick Install (Recommended)
+### Quick Install (Latest Release)
+
+Install or update Adaptive Dock directly with a single command:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/harshp2008/Adaptive-Dock/main/install.sh | bash
+```
+
+### Install from Source
 
 Clone the repository and run the install script:
 
 ```bash
-git clone https://github.com/harshp2008/adaptive-dock.git
-cd adaptive-dock
+git clone https://github.com/harshp2008/Adaptive-Dock.git
+cd Adaptive-Dock
 chmod +x install.sh
 ./install.sh
 ```
@@ -183,9 +208,9 @@ Launch the settings UI via:
 
 | Tab | Available Settings |
 |---|---|
-| **General** | Keyboard shortcut recorder, health check alerts, edge-hover reveal switch, pressure-to-show, animation speeds, hide/show delays, fullscreen & urgent notifications. |
-| **Apps** | Session state memory toggle, per-window isolation switch, searchable list of all installed apps with dropdown options (`Default`, `Hide dock`, `Show dock`). |
-| **Workspaces** | Dynamically synchronized list of GNOME workspaces with dropdown options (`Default`, `Hide dock`, `Show dock`). |
+| **General** | Keyboard shortcut recorders, On-Screen Notification toggles & vertical bottom offset, health check alerts, edge-hover reveal switch, pressure-to-show, animation speeds, hide/show delays, fullscreen & urgent notifications. |
+| **Apps** | Session state memory toggle, global per-window isolation default, **App Isolation Overrides expander** (with app picker dialog), quick per-window toggle buttons on each app row, and searchable list of all installed apps with dock visibility options (`Default`, `Hide dock`, `Show dock`). |
+| **Workspaces** | Dynamically synchronized list of GNOME workspaces, **`+` Add Workspace button** to preset names and append workspaces to GNOME Shell, **✏️ Rename buttons** on each workspace row to rename workspaces system-wide and migrate settings, and dock visibility options (`Default`, `Hide dock`, `Show dock`). |
 
 ### Configuration Storage on Disk
 
@@ -211,8 +236,9 @@ Because configuration files are actively monitored via `Gio.FileMonitor`, manual
 
 | Shortcut | Description |
 |---|---|
-| `Shift + Super + D` *(default)* | Toggle dock visibility for the current application / workspace |
-| *Customizable* | Change or disable in **Preferences > General > Shortcut** |
+| `Shift + Super + D` *(default)* | Toggle dock visibility for the focused application or window |
+| `Shift + Super + W` *(default)* | Toggle dock visibility baseline for the active workspace |
+| *Customizable* | Change or disable individually in **Preferences > General > Keyboard Shortcuts** |
 
 ---
 
