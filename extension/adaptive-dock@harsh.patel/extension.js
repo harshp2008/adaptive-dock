@@ -52,6 +52,8 @@ export default class AdaptiveDock extends Extension {
             Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW, () => this._toggleWorkspace());
 
         this._edgeRevealId = this._kb.connect('changed::edge-hover-reveal', () => this._apply(true));
+        this._notifOffsetId = this._kb.connect('changed::notification-vertical-offset', () => this._updateOsdOffset());
+        this._updateOsdOffset();
         this._addWsId = this._kb.connect('changed::request-add-workspace', () => {
             try {
                 if (global.workspace_manager) {
@@ -82,6 +84,7 @@ export default class AdaptiveDock extends Extension {
             Main.wm.removeKeybinding('toggle-dock');
             Main.wm.removeKeybinding('toggle-workspace-dock');
             if (this._edgeRevealId) this._kb.disconnect(this._edgeRevealId);
+            if (this._notifOffsetId) this._kb.disconnect(this._notifOffsetId);
             if (this._addWsId) this._kb.disconnect(this._addWsId);
             this._kb = null;
         }
@@ -122,7 +125,7 @@ export default class AdaptiveDock extends Extension {
         }
 
         this._focusId = this._wsActiveId = this._wsCountId = this._wsReorderId = null;
-        this._winTrackId = this._wmNamesId = this._monId = this._monitor = this._edgeRevealId = null;
+        this._winTrackId = this._wmNamesId = this._monId = this._monitor = this._edgeRevealId = this._notifOffsetId = null;
         this._settings = this._wm = this._tracker = this._appStates = null;
         this._sessionAppStates = this._sessionWindowStates = this._sessionWorkspaceStates = this._windowSignals = null;
         this._lastKey = null;
@@ -228,7 +231,28 @@ export default class AdaptiveDock extends Extension {
             const sandboxed = win.get_sandboxed_app_id?.();
             if (sandboxed) ids.push(sandboxed.replace(/\.desktop$/, ''));
         } catch (_e) {}
-        return [...new Set(ids.filter(Boolean))];
+        return [...new Set(ids.filter(id => id && id.toLowerCase() !== 'gjs'))];
+    }
+
+    _getFocusAppWindow() {
+        const win = global.display.focus_window;
+        if (!win) return null;
+
+        // Skip background desktop windows, overlays, and taskbar-skipping helpers (e.g. DING desktop icons)
+        if (win.skip_taskbar) return null;
+
+        const type = win.get_window_type ? win.get_window_type() : null;
+        if (type !== null && (
+            type === Meta.WindowType.DESKTOP ||
+            type === Meta.WindowType.DOCK
+        )) {
+            return null;
+        }
+
+        const ids = this._getWindowIdentifiers(win);
+        if (ids.length === 0) return null;
+
+        return win;
     }
 
     _resolveAppState(ids) {
@@ -264,7 +288,7 @@ export default class AdaptiveDock extends Extension {
         return this._readText(GLib.build_filenamev([WS_DIR, `${name}.state`]));
     }
 
-    _showOsd(iconName, label) {
+    _updateOsdOffset() {
         try {
             const offset = this._kb ? this._kb.get_int('notification-vertical-offset') : 80;
             if (Main.osdWindowManager?._osdWindows) {
@@ -276,9 +300,35 @@ export default class AdaptiveDock extends Extension {
                     }
                 }
             }
-            const icon = Gio.Icon.new_for_string(iconName);
-            if (Main.osdWindowManager?.showAll) {
+        } catch (e) {
+            console.warn(`Adaptive Dock: failed to update OSD offset: ${e.message}`);
+        }
+    }
+
+    _showOsd(iconName, label) {
+        try {
+            this._updateOsdOffset();
+
+            let icon = null;
+            if (iconName) {
+                try {
+                    icon = Gio.Icon.new_for_string(iconName);
+                } catch (_e) {
+                    try {
+                        icon = new Gio.ThemedIcon({name: iconName});
+                    } catch (_e2) {}
+                }
+            }
+            if (!icon) {
+                icon = Gio.Icon.new_for_string('user-desktop-symbolic');
+            }
+
+            if (typeof Main.osdWindowManager?.showAll === 'function') {
                 Main.osdWindowManager.showAll(icon, label, null, null);
+            } else if (typeof Main.osdWindowManager?.show === 'function') {
+                Main.osdWindowManager.show(-1, icon, label, null, null);
+            } else {
+                console.warn('Adaptive Dock: No supported OSD display method found on Main.osdWindowManager');
             }
         } catch (e) {
             console.warn(`Adaptive Dock: OSD display failed: ${e.message}`);
@@ -329,7 +379,12 @@ export default class AdaptiveDock extends Extension {
 
     _toggleApp() {
         if (!this._settings) return;
-        const win = global.display.focus_window;
+        if (this._deferTimeoutId) {
+            GLib.source_remove(this._deferTimeoutId);
+            this._deferTimeoutId = null;
+        }
+
+        const win = this._getFocusAppWindow();
         if (!win) {
             this._toggleWorkspace();
             return;
@@ -385,6 +440,11 @@ export default class AdaptiveDock extends Extension {
 
     _toggleWorkspace() {
         if (!this._settings || !global.workspace_manager) return;
+        if (this._deferTimeoutId) {
+            GLib.source_remove(this._deferTimeoutId);
+            this._deferTimeoutId = null;
+        }
+
         const wsIndex = global.workspace_manager.get_active_workspace_index();
         const wsName = this._getWorkspaceName(wsIndex);
 
@@ -401,26 +461,40 @@ export default class AdaptiveDock extends Extension {
         this._sessionWorkspaceStates.set(wsIndex, nextShow ? 'show' : 'hide');
         console.log(`Adaptive Dock: _toggleWorkspace() invoked for ${wsName}! currentWsState=${currentWsState} -> nextShow=${nextShow}`);
 
-        const win = global.display.focus_window;
+        const win = this._getFocusAppWindow();
         const ids = this._getWindowIdentifiers(win);
         const appId = ids[0] || null;
         const winId = win ? win.get_id() : null;
         const appRule = this._resolveAppState(ids);
 
-        const hasAppSessionOverride = (winId && this._sessionWindowStates.has(winId)) ||
-            ids.some(id => this._sessionAppStates.has(id));
+        // When toggling workspace baseline, clear any conflicting temporary in-memory session override on the active app/window
+        if (winId && this._sessionWindowStates.has(winId)) {
+            this._sessionWindowStates.delete(winId);
+        }
+        for (const id of ids) {
+            this._sessionAppStates.delete(id);
+        }
+
         const hasExplicitPersistentRule = appRule === 'show' || appRule === 'hide';
 
-        // If the active window relies on the workspace baseline, update dock visibility immediately
-        if (!hasAppSessionOverride && !hasExplicitPersistentRule && appRule !== 'bypass') {
+        // If the active window relies on the workspace baseline (or no app window is focused),
+        // update dock visibility immediately
+        if (!hasExplicitPersistentRule && appRule !== 'bypass') {
             this._setDockVisibility(nextShow);
             this._lastNonBypassedShowState = nextShow;
         }
 
         const shouldNotify = this._kb ? this._kb.get_boolean('notify-on-workspace-toggle') : true;
         if (shouldNotify) {
-            const statusText = nextShow ? 'Shown' : 'Hidden';
-            this._showOsd('video-display-symbolic', `Dock: ${statusText} (Workspace: ${wsName})`);
+            if (hasExplicitPersistentRule) {
+                const appStateText = appRule === 'show' ? 'Always Shown' : 'Always Hidden';
+                this._showOsd('video-display-symbolic', `Workspace: ${nextShow ? 'Shown' : 'Hidden'} (App: ${appStateText})`);
+            } else if (appRule === 'bypass') {
+                this._showOsd('video-display-symbolic', `Workspace: ${nextShow ? 'Shown' : 'Hidden'} (App: Bypass)`);
+            } else {
+                const statusText = nextShow ? 'Shown' : 'Hidden';
+                this._showOsd('video-display-symbolic', `Dock: ${statusText} (Workspace: ${wsName})`);
+            }
         }
     }
 
@@ -433,7 +507,7 @@ export default class AdaptiveDock extends Extension {
             this._deferTimeoutId = null;
         }
 
-        const win = global.display.focus_window;
+        const win = this._getFocusAppWindow();
 
         // If no window is focused and this is not a force-evaluation,
         // defer by 300ms to allow hotkey launchers, popup windows (like Win11Clip),
