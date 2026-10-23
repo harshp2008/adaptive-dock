@@ -538,8 +538,8 @@ export default class Prefs extends ExtensionPreferences {
             shortcutsGroup.add(row);
         };
 
-        createShortcutRow('Toggle Active App / Window', 'Temporarily overrides dock visibility for the focused application or window', 'toggle-dock');
-        createShortcutRow('Toggle Workspace Baseline', 'Temporarily overrides dock visibility baseline for all default apps in the active workspace', 'toggle-workspace-dock');
+        createShortcutRow('Toggle Active App / Window', 'Override dock for focused window', 'toggle-dock');
+        createShortcutRow('Toggle Workspace Baseline', 'Override dock baseline for active workspace', 'toggle-workspace-dock');
 
         genPage.add(shortcutsGroup);
 
@@ -642,7 +642,6 @@ export default class Prefs extends ExtensionPreferences {
             const posModel = Gtk.StringList.new(dockPositions.map(p => p.label));
             const posRow = new Adw.ComboRow({
                 title: 'Position on Screen',
-                subtitle: 'Screen edge where the dock is placed',
                 model: posModel,
             });
             const updatePosRow = () => {
@@ -680,7 +679,6 @@ export default class Prefs extends ExtensionPreferences {
             if (hasKey(dockSettings, 'dash-max-icon-size')) {
                 const iconSizeRow = Adw.SpinRow.new_with_range(16.0, 128.0, 2.0);
                 iconSizeRow.title = 'Dock Icon Size (px)';
-                iconSizeRow.subtitle = 'Size limit for dock application icons';
                 iconSizeRow.set_digits(0);
                 dockSettings.bind('dash-max-icon-size', iconSizeRow, 'value', Gio.SettingsBindFlags.DEFAULT);
                 placementGroup.add(iconSizeRow);
@@ -697,7 +695,6 @@ export default class Prefs extends ExtensionPreferences {
             // Master switch: Reveal dock on mouse hover at screen edge (autohide)
             const autohideRow = new Adw.SwitchRow({
                 title: 'Reveal dock at screen edge',
-                subtitle: 'Show the dock when moving the cursor to the screen edge',
             });
             if (hasKey(dockSettings, 'autohide')) {
                 dockSettings.bind('autohide', autohideRow, 'active', Gio.SettingsBindFlags.DEFAULT);
@@ -742,7 +739,7 @@ export default class Prefs extends ExtensionPreferences {
             if (hasKey(dockSettings, 'hide-delay')) {
                 hideTimeoutRow = Adw.SpinRow.new_with_range(0.0, 2.0, 0.05);
                 hideTimeoutRow.title = 'Hide delay (s)';
-                hideTimeoutRow.subtitle = 'Delay before dock hides after moving cursor away';
+                hideTimeoutRow.subtitle = 'Delay before dock hides';
                 hideTimeoutRow.set_digits(3);
                 dockSettings.bind('hide-delay', hideTimeoutRow, 'value', Gio.SettingsBindFlags.DEFAULT);
                 edgeGroup.add(hideTimeoutRow);
@@ -753,7 +750,7 @@ export default class Prefs extends ExtensionPreferences {
             if (hasKey(dockSettings, 'animation-time')) {
                 animRow = Adw.SpinRow.new_with_range(0.05, 2.0, 0.05);
                 animRow.title = 'Animation duration (s)';
-                animRow.subtitle = 'Duration of dock show and hide animations';
+                animRow.subtitle = 'Slide animation speed';
                 animRow.set_digits(3);
                 dockSettings.bind('animation-time', animRow, 'value', Gio.SettingsBindFlags.DEFAULT);
                 edgeGroup.add(animRow);
@@ -764,7 +761,7 @@ export default class Prefs extends ExtensionPreferences {
             if (hasKey(dockSettings, 'autohide-in-fullscreen')) {
                 fsRow = new Adw.SwitchRow({
                     title: 'Enable in fullscreen mode',
-                    subtitle: 'Allow revealing dock at screen edge while an app is fullscreen',
+                    subtitle: 'Allow edge reveal during fullscreen',
                 });
                 dockSettings.bind('autohide-in-fullscreen', fsRow, 'active', Gio.SettingsBindFlags.DEFAULT);
                 edgeGroup.add(fsRow);
@@ -775,7 +772,7 @@ export default class Prefs extends ExtensionPreferences {
             if (hasKey(dockSettings, 'show-dock-urgent-notify')) {
                 urgRow = new Adw.SwitchRow({
                     title: 'Show dock for urgent notifications',
-                    subtitle: 'Automatically reveal dock when an application demands attention',
+                    subtitle: 'Reveal dock when apps demand attention',
                 });
                 dockSettings.bind('show-dock-urgent-notify', urgRow, 'active', Gio.SettingsBindFlags.DEFAULT);
                 edgeGroup.add(urgRow);
