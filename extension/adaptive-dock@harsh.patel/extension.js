@@ -52,8 +52,21 @@ export default class AdaptiveDock extends Extension {
             Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW, () => this._toggleWorkspace());
 
         this._edgeRevealId = this._kb.connect('changed::edge-hover-reveal', () => this._apply(true));
-        this._notifOffsetId = this._kb.connect('changed::notification-vertical-offset', () => this._updateOsdOffset());
-        this._updateOsdOffset();
+
+        // Intercept system OSD displays to ensure system level indicators (volume, brightness)
+        // are never affected by notification offsets.
+        if (Main.osdWindowManager && typeof Main.osdWindowManager._showOsdWindow === 'function') {
+            this._origShowOsdWindow = Main.osdWindowManager._showOsdWindow;
+            Main.osdWindowManager._showOsdWindow = (monitorIndex, icon, label, level, maxLevel) => {
+                if (level !== null && level !== undefined) {
+                    const osd = Main.osdWindowManager._osdWindows?.[monitorIndex];
+                    if (osd?._hbox) osd._hbox.translation_y = 0;
+                    else if (osd) osd.translation_y = 0;
+                }
+                this._origShowOsdWindow.call(Main.osdWindowManager, monitorIndex, icon, label, level, maxLevel);
+            };
+        }
+
         this._addWsId = this._kb.connect('changed::request-add-workspace', () => {
             try {
                 if (global.workspace_manager) {
@@ -80,11 +93,15 @@ export default class AdaptiveDock extends Extension {
     }
 
     disable() {
+        if (this._origShowOsdWindow && Main.osdWindowManager) {
+            Main.osdWindowManager._showOsdWindow = this._origShowOsdWindow;
+            this._origShowOsdWindow = null;
+        }
+
         if (this._kb) {
             Main.wm.removeKeybinding('toggle-dock');
             Main.wm.removeKeybinding('toggle-workspace-dock');
             if (this._edgeRevealId) this._kb.disconnect(this._edgeRevealId);
-            if (this._notifOffsetId) this._kb.disconnect(this._notifOffsetId);
             if (this._addWsId) this._kb.disconnect(this._addWsId);
             this._kb = null;
         }
@@ -119,13 +136,19 @@ export default class AdaptiveDock extends Extension {
 
         if (Main.osdWindowManager?._osdWindows) {
             for (const osd of Main.osdWindowManager._osdWindows) {
+                if (osd?._adaptiveDockResetId) {
+                    try {
+                        osd.disconnect(osd._adaptiveDockResetId);
+                    } catch (_e) {}
+                    osd._adaptiveDockResetId = null;
+                }
                 if (osd?._hbox) osd._hbox.translation_y = 0;
                 if (osd) osd.translation_y = 0;
             }
         }
 
         this._focusId = this._wsActiveId = this._wsCountId = this._wsReorderId = null;
-        this._winTrackId = this._wmNamesId = this._monId = this._monitor = this._edgeRevealId = this._notifOffsetId = null;
+        this._winTrackId = this._wmNamesId = this._monId = this._monitor = this._edgeRevealId = null;
         this._settings = this._wm = this._tracker = this._appStates = null;
         this._sessionAppStates = this._sessionWindowStates = this._sessionWorkspaceStates = this._windowSignals = null;
         this._lastKey = null;
@@ -185,22 +208,12 @@ export default class AdaptiveDock extends Extension {
 
     _setDockVisibility(show) {
         if (!this._settings) return;
-        const hoverReveal = this._kb ? this._kb.get_boolean('edge-hover-reveal') : false;
 
         // 1. Intelligent autohide must be turned on at all times (dock-fixed = false)
         if (this._hasKey('dock-fixed') && this._settings.get_boolean('dock-fixed') !== false)
             this._settings.set_boolean('dock-fixed', false);
 
-        // 2. Autohide must be turned on at all times
-        if (this._hasKey('autohide') && this._settings.get_boolean('autohide') !== true)
-            this._settings.set_boolean('autohide', true);
-
-        // 3. Match "Reveal dock on mouse hover" with "Push to show: require pressure to show the dock"
-        const targetPressure = !hoverReveal;
-        if (this._hasKey('require-pressure-to-show') && this._settings.get_boolean('require-pressure-to-show') !== targetPressure)
-            this._settings.set_boolean('require-pressure-to-show', targetPressure);
-
-        // 4. Toggle Dodge windows (intellihide) to show and hide the dock
+        // 2. Toggle Dodge windows (intellihide) to show and hide the dock
         if (this._hasKey('intellihide') && this._settings.get_boolean('intellihide') !== show)
             this._settings.set_boolean('intellihide', show);
     }
@@ -288,21 +301,73 @@ export default class AdaptiveDock extends Extension {
         return this._readText(GLib.build_filenamev([WS_DIR, `${name}.state`]));
     }
 
-    _updateOsdOffset() {
-        try {
-            const offset = this._kb ? this._kb.get_int('notification-vertical-offset') : 0;
-            if (Main.osdWindowManager?._osdWindows) {
-                for (const osd of Main.osdWindowManager._osdWindows) {
-                    if (osd?._hbox) {
-                        osd._hbox.translation_y = -offset;
-                    } else if (osd) {
-                        osd.translation_y = -offset;
+    _getDockGeometry(monitorIndex = -1) {
+        let position = 'BOTTOM';
+        let height = 0;
+        let isBottom = false;
+
+        // 1. Query Dash to Dock / Ubuntu Dock GSettings
+        if (this._settings) {
+            try {
+                position = this._settings.get_string('dock-position');
+            } catch (_e) {
+                try {
+                    const enumVal = this._settings.get_enum('dock-position');
+                    if (enumVal === 0) position = 'TOP';
+                    else if (enumVal === 1) position = 'RIGHT';
+                    else if (enumVal === 2) position = 'BOTTOM';
+                    else if (enumVal === 3) position = 'LEFT';
+                } catch (_e2) {}
+            }
+        }
+
+        isBottom = (position === 'BOTTOM');
+
+        // 2. Query live Clutter actor if dock is on BOTTOM
+        if (isBottom && Main.layoutManager?._trackedActors) {
+            for (const item of Main.layoutManager._trackedActors) {
+                const actor = item.actor;
+                if (!actor) continue;
+                const name = actor.name || (actor.get_name ? actor.get_name() : '');
+                if (name === 'dashtodockContainer') {
+                    if (monitorIndex !== -1 && actor.monitorIndex !== undefined && actor.monitorIndex !== monitorIndex) {
+                        continue;
                     }
+                    const box = actor._box || actor.get_first_child()?.get_first_child();
+                    if (box && typeof box.get_height === 'function') {
+                        height = Math.round(box.get_height());
+                    } else if (actor.height > 0) {
+                        height = Math.round(actor.height);
+                    }
+                    if (height > 0) break;
                 }
             }
-        } catch (e) {
-            console.warn(`Adaptive Dock: failed to update OSD offset: ${e.message}`);
         }
+
+        // 3. Fallback calculation if live actor not resolved yet
+        if (isBottom && height === 0 && this._settings) {
+            try {
+                const iconSize = this._settings.get_int('dash-max-icon-size') || 48;
+                height = iconSize + 20;
+            } catch (_e) {
+                height = 68;
+            }
+        }
+
+        // 4. Compute recommended clearance offset
+        let recommendedOffset = 0;
+        if (isBottom && height > 0) {
+            const nativeMargin = 60; // Standard GNOME Shell 4em margin-bottom
+            const gap = 12; // Visual gap between dock top and OSD pill bottom
+            recommendedOffset = Math.max(0, (height + gap) - nativeMargin);
+        }
+
+        return {
+            position,
+            height,
+            isBottom,
+            recommendedOffset,
+        };
     }
 
     _getAppIcon(show) {
@@ -318,14 +383,41 @@ export default class AdaptiveDock extends Extension {
         const style = this._kb ? this._kb.get_string('osd-workspace-icon-style') : 'display';
         if (style === 'grid') return 'view-grid-symbolic';
         if (style === 'multitasking') return 'preferences-desktop-multitasking-symbolic';
-        if (style === 'wallpaper') return 'preferences-desktop-wallpaper-symbolic';
         // Default: 'display'
         return 'video-display-symbolic';
     }
 
     _showOsd(iconName, label) {
         try {
-            this._updateOsdOffset();
+            const geom = this._getDockGeometry(-1);
+            const extraOffset = this._kb ? this._kb.get_int('notification-vertical-offset') : 0;
+            const offset = Math.max(0, geom.recommendedOffset + extraOffset);
+
+            // Apply ephemeral elevation to OSD windows
+            if (Main.osdWindowManager?._osdWindows) {
+                for (const osd of Main.osdWindowManager._osdWindows) {
+                    if (!osd) continue;
+
+                    if (osd._hbox) osd._hbox.translation_y = -offset;
+                    else osd.translation_y = -offset;
+
+                    // Automatically restore translation_y = 0 when notification hides
+                    if (!osd._adaptiveDockResetId) {
+                        osd._adaptiveDockResetId = osd.connect('notify::visible', () => {
+                            if (!osd.visible) {
+                                if (osd._hbox) osd._hbox.translation_y = 0;
+                                else osd.translation_y = 0;
+                                if (osd._adaptiveDockResetId) {
+                                    try {
+                                        osd.disconnect(osd._adaptiveDockResetId);
+                                    } catch (_e) {}
+                                    osd._adaptiveDockResetId = null;
+                                }
+                            }
+                        });
+                    }
+                }
+            }
 
             let icon = null;
             if (iconName) {

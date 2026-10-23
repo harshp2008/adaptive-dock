@@ -546,20 +546,20 @@ export default class Prefs extends ExtensionPreferences {
         // On-Screen Notifications group
         const notifGroup = new Adw.PreferencesGroup({
             title: 'On-Screen Notifications',
-            description: 'Configure visual on-screen feedback when shortcut toggles are pressed.',
+            description: 'Configure visual indicators when shortcut toggles are pressed.',
         });
 
         const appNotifRow = new Adw.SwitchRow({
-            title: 'Notify on App / Window Toggle',
-            subtitle: 'Show notification pill when toggling dock for the active app',
+            title: 'Notify on App Toggle',
+            subtitle: 'Show indicator when toggling dock for active app',
             active: settings.get_boolean('notify-on-app-toggle'),
         });
         settings.bind('notify-on-app-toggle', appNotifRow, 'active', Gio.SettingsBindFlags.DEFAULT);
         notifGroup.add(appNotifRow);
 
         const wsNotifRow = new Adw.SwitchRow({
-            title: 'Notify on Workspace Baseline Toggle',
-            subtitle: 'Show notification pill when toggling dock baseline for the workspace',
+            title: 'Notify on Workspace Toggle',
+            subtitle: 'Show indicator when toggling dock baseline for workspace',
             active: settings.get_boolean('notify-on-workspace-toggle'),
         });
         settings.bind('notify-on-workspace-toggle', wsNotifRow, 'active', Gio.SettingsBindFlags.DEFAULT);
@@ -567,13 +567,13 @@ export default class Prefs extends ExtensionPreferences {
 
         // App notification icon style selector
         const appIconStyles = [
-            { id: 'eye', label: 'Eye Visibility (Reveal / Conceal)' },
-            { id: 'window', label: 'Window State (Focus / Minimize)' },
+            { id: 'eye', label: 'Eye' },
+            { id: 'window', label: 'Window' },
         ];
         const appIconModel = Gtk.StringList.new(appIconStyles.map(s => s.label));
         const appIconRow = new Adw.ComboRow({
-            title: 'App Notification Icon',
-            subtitle: 'Choose symbolic icon style for app dock toggle notifications',
+            title: 'App Icon',
+            subtitle: 'Icon style for app toggle indicators',
             model: appIconModel,
         });
         const curAppStyle = settings.get_string('osd-app-icon-style') || 'eye';
@@ -587,15 +587,14 @@ export default class Prefs extends ExtensionPreferences {
 
         // Workspace notification icon style selector
         const wsIconStyles = [
-            { id: 'display', label: 'Display Monitor (video-display)' },
-            { id: 'grid', label: 'Workspace Grid (view-grid)' },
-            { id: 'multitasking', label: 'Multitasking (preferences-desktop-multitasking)' },
-            { id: 'wallpaper', label: 'Desktop Wallpaper (preferences-desktop-wallpaper)' },
+            { id: 'display', label: 'Display' },
+            { id: 'grid', label: 'Grid' },
+            { id: 'multitasking', label: 'Multitasking' },
         ];
         const wsIconModel = Gtk.StringList.new(wsIconStyles.map(s => s.label));
         const wsIconRow = new Adw.ComboRow({
-            title: 'Workspace Notification Icon',
-            subtitle: 'Choose symbolic icon style for workspace baseline toggle notifications',
+            title: 'Workspace Icon',
+            subtitle: 'Icon style for workspace toggle indicators',
             model: wsIconModel,
         });
         const curWsStyle = settings.get_string('osd-workspace-icon-style') || 'display';
@@ -607,18 +606,18 @@ export default class Prefs extends ExtensionPreferences {
         });
         notifGroup.add(wsIconRow);
 
-        const offsetRow = Adw.SpinRow.new_with_range(0.0, 400.0, 5.0);
-        offsetRow.title = 'Notification bottom offset (px)';
-        offsetRow.subtitle = '0 px keeps pure native alignment right above the dock; increase to elevate further';
+        const offsetRow = Adw.SpinRow.new_with_range(-50.0, 300.0, 5.0);
+        offsetRow.title = 'Offset Adjustment (px)';
+        offsetRow.subtitle = 'Fine-tune notification vertical position';
         offsetRow.set_digits(0);
         settings.bind('notification-vertical-offset', offsetRow, 'value', Gio.SettingsBindFlags.DEFAULT);
         notifGroup.add(offsetRow);
 
         const updateNotifSensitivity = () => {
             const anyActive = appNotifRow.active || wsNotifRow.active;
-            offsetRow.sensitive = anyActive;
             appIconRow.sensitive = appNotifRow.active;
             wsIconRow.sensitive = wsNotifRow.active;
+            offsetRow.sensitive = anyActive;
         };
         appNotifRow.connect('notify::active', updateNotifSensitivity);
         wsNotifRow.connect('notify::active', updateNotifSensitivity);
@@ -626,62 +625,130 @@ export default class Prefs extends ExtensionPreferences {
 
         genPage.add(notifGroup);
 
-        // Edge Reveal & Autohide group
+        // Dock Placement & Size group
         if (dockSettings) {
-            const edgeGroup = new Adw.PreferencesGroup({
-                title: 'Screen Edge Dock Reveal',
-                description: 'Configure whether and how the dock reveals itself when moving the cursor to the screen edge.',
+            const placementGroup = new Adw.PreferencesGroup({
+                title: 'Dock Placement & Size',
+                description: 'Configure dock screen position and icon sizing.',
             });
 
-            // Autohide must always remain true per user requirement
-            if (hasKey(dockSettings, 'autohide') && dockSettings.get_boolean('autohide') !== true) {
-                dockSettings.set_boolean('autohide', true);
+            // Dock Screen Position selector
+            const dockPositions = [
+                { id: 2, label: 'Bottom' },
+                { id: 3, label: 'Left' },
+                { id: 1, label: 'Right' },
+                { id: 0, label: 'Top' },
+            ];
+            const posModel = Gtk.StringList.new(dockPositions.map(p => p.label));
+            const posRow = new Adw.ComboRow({
+                title: 'Position on Screen',
+                subtitle: 'Screen edge where the dock is placed',
+                model: posModel,
+            });
+            const updatePosRow = () => {
+                let curEnum = 2;
+                try {
+                    curEnum = dockSettings.get_enum('dock-position');
+                } catch (_e) {
+                    const s = dockSettings.get_string('dock-position');
+                    if (s === 'TOP') curEnum = 0;
+                    else if (s === 'RIGHT') curEnum = 1;
+                    else if (s === 'BOTTOM') curEnum = 2;
+                    else if (s === 'LEFT') curEnum = 3;
+                }
+                const idx = dockPositions.findIndex(p => p.id === curEnum);
+                if (idx >= 0 && posRow.selected !== idx) posRow.selected = idx;
+            };
+            updatePosRow();
+            posRow.connect('notify::selected', () => {
+                const chosen = dockPositions[posRow.selected];
+                if (chosen !== undefined) {
+                    try {
+                        dockSettings.set_enum('dock-position', chosen.id);
+                    } catch (_e) {
+                        const strVal = chosen.id === 0 ? 'TOP' : chosen.id === 1 ? 'RIGHT' : chosen.id === 2 ? 'BOTTOM' : 'LEFT';
+                        dockSettings.set_string('dock-position', strVal);
+                    }
+                }
+            });
+            try {
+                dockSettings.connect('changed::dock-position', updatePosRow);
+            } catch (_e) {}
+            placementGroup.add(posRow);
+
+            // Dock Icon Size limit
+            if (hasKey(dockSettings, 'dash-max-icon-size')) {
+                const iconSizeRow = Adw.SpinRow.new_with_range(16.0, 128.0, 2.0);
+                iconSizeRow.title = 'Dock Icon Size (px)';
+                iconSizeRow.subtitle = 'Size limit for dock application icons';
+                iconSizeRow.set_digits(0);
+                dockSettings.bind('dash-max-icon-size', iconSizeRow, 'value', Gio.SettingsBindFlags.DEFAULT);
+                placementGroup.add(iconSizeRow);
             }
 
-            const revealRow = new Adw.SwitchRow({
-                title: 'Reveal dock on mouse hover',
-                subtitle: 'Show the dock when moving the cursor to the screen edge (disables "Push to show" pressure requirement)',
-                active: settings.get_boolean('edge-hover-reveal'),
-            });
-            settings.bind('edge-hover-reveal', revealRow, 'active', Gio.SettingsBindFlags.DEFAULT);
-            revealRow.connect('notify::active', () => {
-                if (hasKey(dockSettings, 'autohide'))
-                    dockSettings.set_boolean('autohide', true);
-                if (hasKey(dockSettings, 'require-pressure-to-show'))
-                    dockSettings.set_boolean('require-pressure-to-show', !revealRow.active);
-            });
-            edgeGroup.add(revealRow);
+            genPage.add(placementGroup);
 
+            // Screen Edge Autohide & Reveal group
+            const edgeGroup = new Adw.PreferencesGroup({
+                title: 'Screen Edge Autohide & Reveal',
+                description: 'Configure how the dock reveals itself when moving cursor to screen edge.',
+            });
+
+            // Master switch: Reveal dock on mouse hover at screen edge (autohide)
+            const autohideRow = new Adw.SwitchRow({
+                title: 'Reveal dock at screen edge',
+                subtitle: 'Show the dock when moving the cursor to the screen edge',
+            });
+            if (hasKey(dockSettings, 'autohide')) {
+                dockSettings.bind('autohide', autohideRow, 'active', Gio.SettingsBindFlags.DEFAULT);
+            }
+            edgeGroup.add(autohideRow);
+
+            // Independent switch: Require pressure to show (Push to show)
+            let pressureSwitchRow = null;
+            if (hasKey(dockSettings, 'require-pressure-to-show')) {
+                pressureSwitchRow = new Adw.SwitchRow({
+                    title: 'Require pressure to reveal',
+                    subtitle: 'Push against edge with mouse pressure instead of hovering',
+                });
+                dockSettings.bind('require-pressure-to-show', pressureSwitchRow, 'active', Gio.SettingsBindFlags.DEFAULT);
+                edgeGroup.add(pressureSwitchRow);
+            }
+
+            // Pressure threshold
             let pressureRow = null;
             if (hasKey(dockSettings, 'pressure-threshold')) {
-                pressureRow = Adw.SpinRow.new_with_range(0.0, 100.0, 5.0);
+                pressureRow = Adw.SpinRow.new_with_range(0.0, 1000.0, 50.0);
                 pressureRow.title = 'Pressure threshold';
-                pressureRow.subtitle = 'Amount of mouse pressure needed to reveal dock (when hover reveal is disabled)';
+                pressureRow.subtitle = 'Amount of mouse pressure needed to reveal dock';
                 pressureRow.set_digits(0);
                 dockSettings.bind('pressure-threshold', pressureRow, 'value', Gio.SettingsBindFlags.DEFAULT);
                 edgeGroup.add(pressureRow);
             }
 
+            // Show delay (when pressure is off)
             let showTimeoutRow = null;
             if (hasKey(dockSettings, 'show-delay')) {
                 showTimeoutRow = Adw.SpinRow.new_with_range(0.0, 2.0, 0.05);
-                showTimeoutRow.title = 'Show timeout (s)';
-                showTimeoutRow.subtitle = 'Hover delay before revealing dock (when hover reveal is enabled)';
+                showTimeoutRow.title = 'Show delay (s)';
+                showTimeoutRow.subtitle = 'Hover delay before revealing dock (when pressure is off)';
                 showTimeoutRow.set_digits(3);
                 dockSettings.bind('show-delay', showTimeoutRow, 'value', Gio.SettingsBindFlags.DEFAULT);
                 edgeGroup.add(showTimeoutRow);
             }
 
+            // Hide delay
             let hideTimeoutRow = null;
             if (hasKey(dockSettings, 'hide-delay')) {
                 hideTimeoutRow = Adw.SpinRow.new_with_range(0.0, 2.0, 0.05);
-                hideTimeoutRow.title = 'Hide timeout (s)';
+                hideTimeoutRow.title = 'Hide delay (s)';
                 hideTimeoutRow.subtitle = 'Delay before dock hides after moving cursor away';
                 hideTimeoutRow.set_digits(3);
                 dockSettings.bind('hide-delay', hideTimeoutRow, 'value', Gio.SettingsBindFlags.DEFAULT);
                 edgeGroup.add(hideTimeoutRow);
             }
 
+            // Animation duration
             let animRow = null;
             if (hasKey(dockSettings, 'animation-time')) {
                 animRow = Adw.SpinRow.new_with_range(0.05, 2.0, 0.05);
@@ -692,47 +759,47 @@ export default class Prefs extends ExtensionPreferences {
                 edgeGroup.add(animRow);
             }
 
-            const updateSensitivity = () => {
-                const rev = revealRow.active;
-                if (pressureRow) pressureRow.sensitive = !rev;
-                if (showTimeoutRow) showTimeoutRow.sensitive = rev;
+            // Fullscreen
+            let fsRow = null;
+            if (hasKey(dockSettings, 'autohide-in-fullscreen')) {
+                fsRow = new Adw.SwitchRow({
+                    title: 'Enable in fullscreen mode',
+                    subtitle: 'Allow revealing dock at screen edge while an app is fullscreen',
+                });
+                dockSettings.bind('autohide-in-fullscreen', fsRow, 'active', Gio.SettingsBindFlags.DEFAULT);
+                edgeGroup.add(fsRow);
+            }
+
+            // Urgent alerts
+            let urgRow = null;
+            if (hasKey(dockSettings, 'show-dock-urgent-notify')) {
+                urgRow = new Adw.SwitchRow({
+                    title: 'Show dock for urgent notifications',
+                    subtitle: 'Automatically reveal dock when an application demands attention',
+                });
+                dockSettings.bind('show-dock-urgent-notify', urgRow, 'active', Gio.SettingsBindFlags.DEFAULT);
+                edgeGroup.add(urgRow);
+            }
+
+            // Sensitivity updates matching Dash to Dock
+            const updateEdgeSensitivity = () => {
+                const auto = autohideRow.active;
+                const reqPressure = pressureSwitchRow ? pressureSwitchRow.active : false;
+
+                if (pressureSwitchRow) pressureSwitchRow.sensitive = auto;
+                if (pressureRow) pressureRow.sensitive = auto && reqPressure;
+                if (showTimeoutRow) showTimeoutRow.sensitive = auto && !reqPressure;
+                if (hideTimeoutRow) hideTimeoutRow.sensitive = auto;
+                if (animRow) animRow.sensitive = auto;
+                if (fsRow) fsRow.sensitive = auto;
+                if (urgRow) urgRow.sensitive = auto;
             };
 
-            revealRow.connect('notify::active', updateSensitivity);
-            updateSensitivity();
+            autohideRow.connect('notify::active', updateEdgeSensitivity);
+            if (pressureSwitchRow) pressureSwitchRow.connect('notify::active', updateEdgeSensitivity);
+            updateEdgeSensitivity();
 
             genPage.add(edgeGroup);
-
-            // Additional behaviors group
-            const hasFullscreen = hasKey(dockSettings, 'autohide-in-fullscreen');
-            const hasUrgent = hasKey(dockSettings, 'show-dock-urgent-notify');
-
-            if (hasFullscreen || hasUrgent) {
-                const extraGroup = new Adw.PreferencesGroup({
-                    title: 'Additional Behaviors',
-                    description: 'Specific dock visibility triggers.',
-                });
-
-                if (hasFullscreen) {
-                    const fsRow = new Adw.SwitchRow({
-                        title: 'Enable in fullscreen mode',
-                        subtitle: 'Allow revealing the dock at screen edge while an app is fullscreen',
-                    });
-                    dockSettings.bind('autohide-in-fullscreen', fsRow, 'active', Gio.SettingsBindFlags.DEFAULT);
-                    extraGroup.add(fsRow);
-                }
-
-                if (hasUrgent) {
-                    const urgRow = new Adw.SwitchRow({
-                        title: 'Show dock for urgent notifications',
-                        subtitle: 'Automatically reveal the dock when an application demands attention',
-                    });
-                    dockSettings.bind('show-dock-urgent-notify', urgRow, 'active', Gio.SettingsBindFlags.DEFAULT);
-                    extraGroup.add(urgRow);
-                }
-
-                genPage.add(extraGroup);
-            }
         }
 
         window.add(genPage);
