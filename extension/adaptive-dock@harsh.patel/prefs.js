@@ -565,9 +565,51 @@ export default class Prefs extends ExtensionPreferences {
         settings.bind('notify-on-workspace-toggle', wsNotifRow, 'active', Gio.SettingsBindFlags.DEFAULT);
         notifGroup.add(wsNotifRow);
 
+        // App notification icon style selector
+        const appIconStyles = [
+            { id: 'eye', label: 'Eye Visibility (Reveal / Conceal)' },
+            { id: 'window', label: 'Window State (Focus / Minimize)' },
+        ];
+        const appIconModel = Gtk.StringList.new(appIconStyles.map(s => s.label));
+        const appIconRow = new Adw.ComboRow({
+            title: 'App Notification Icon',
+            subtitle: 'Choose symbolic icon style for app dock toggle notifications',
+            model: appIconModel,
+        });
+        const curAppStyle = settings.get_string('osd-app-icon-style') || 'eye';
+        const curAppIdx = appIconStyles.findIndex(s => s.id === curAppStyle);
+        appIconRow.selected = curAppIdx >= 0 ? curAppIdx : 0;
+        appIconRow.connect('notify::selected', () => {
+            const selectedItem = appIconStyles[appIconRow.selected];
+            if (selectedItem) settings.set_string('osd-app-icon-style', selectedItem.id);
+        });
+        notifGroup.add(appIconRow);
+
+        // Workspace notification icon style selector
+        const wsIconStyles = [
+            { id: 'display', label: 'Display Monitor (video-display)' },
+            { id: 'grid', label: 'Workspace Grid (view-grid)' },
+            { id: 'multitasking', label: 'Multitasking (preferences-desktop-multitasking)' },
+            { id: 'wallpaper', label: 'Desktop Wallpaper (preferences-desktop-wallpaper)' },
+        ];
+        const wsIconModel = Gtk.StringList.new(wsIconStyles.map(s => s.label));
+        const wsIconRow = new Adw.ComboRow({
+            title: 'Workspace Notification Icon',
+            subtitle: 'Choose symbolic icon style for workspace baseline toggle notifications',
+            model: wsIconModel,
+        });
+        const curWsStyle = settings.get_string('osd-workspace-icon-style') || 'display';
+        const curWsIdx = wsIconStyles.findIndex(s => s.id === curWsStyle);
+        wsIconRow.selected = curWsIdx >= 0 ? curWsIdx : 0;
+        wsIconRow.connect('notify::selected', () => {
+            const selectedItem = wsIconStyles[wsIconRow.selected];
+            if (selectedItem) settings.set_string('osd-workspace-icon-style', selectedItem.id);
+        });
+        notifGroup.add(wsIconRow);
+
         const offsetRow = Adw.SpinRow.new_with_range(0.0, 400.0, 5.0);
         offsetRow.title = 'Notification bottom offset (px)';
-        offsetRow.subtitle = 'Elevates the notification pill above bottom docks to prevent visual overlap';
+        offsetRow.subtitle = '0 px keeps pure native alignment right above the dock; increase to elevate further';
         offsetRow.set_digits(0);
         settings.bind('notification-vertical-offset', offsetRow, 'value', Gio.SettingsBindFlags.DEFAULT);
         notifGroup.add(offsetRow);
@@ -575,6 +617,8 @@ export default class Prefs extends ExtensionPreferences {
         const updateNotifSensitivity = () => {
             const anyActive = appNotifRow.active || wsNotifRow.active;
             offsetRow.sensitive = anyActive;
+            appIconRow.sensitive = appNotifRow.active;
+            wsIconRow.sensitive = wsNotifRow.active;
         };
         appNotifRow.connect('notify::active', updateNotifSensitivity);
         wsNotifRow.connect('notify::active', updateNotifSensitivity);

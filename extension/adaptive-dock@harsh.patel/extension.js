@@ -290,7 +290,7 @@ export default class AdaptiveDock extends Extension {
 
     _updateOsdOffset() {
         try {
-            const offset = this._kb ? this._kb.get_int('notification-vertical-offset') : 80;
+            const offset = this._kb ? this._kb.get_int('notification-vertical-offset') : 0;
             if (Main.osdWindowManager?._osdWindows) {
                 for (const osd of Main.osdWindowManager._osdWindows) {
                     if (osd?._hbox) {
@@ -303,6 +303,24 @@ export default class AdaptiveDock extends Extension {
         } catch (e) {
             console.warn(`Adaptive Dock: failed to update OSD offset: ${e.message}`);
         }
+    }
+
+    _getAppIcon(show) {
+        const style = this._kb ? this._kb.get_string('osd-app-icon-style') : 'eye';
+        if (style === 'window') {
+            return show ? 'focus-windows-symbolic' : 'window-minimize-symbolic';
+        }
+        // Default: 'eye'
+        return show ? 'view-reveal-symbolic' : 'view-conceal-symbolic';
+    }
+
+    _getWorkspaceIcon() {
+        const style = this._kb ? this._kb.get_string('osd-workspace-icon-style') : 'display';
+        if (style === 'grid') return 'view-grid-symbolic';
+        if (style === 'multitasking') return 'preferences-desktop-multitasking-symbolic';
+        if (style === 'wallpaper') return 'preferences-desktop-wallpaper-symbolic';
+        // Default: 'display'
+        return 'video-display-symbolic';
     }
 
     _showOsd(iconName, label) {
@@ -433,8 +451,8 @@ export default class AdaptiveDock extends Extension {
         const shouldNotify = this._kb ? this._kb.get_boolean('notify-on-app-toggle') : true;
         if (shouldNotify) {
             const statusText = nextShow ? 'Shown' : 'Hidden';
-            this._showOsd(nextShow ? 'user-desktop-symbolic' : 'view-paged-symbolic',
-                `Dock: ${statusText} (${appName})`);
+            const icon = this._getAppIcon(nextShow);
+            this._showOsd(icon, `${appName}: Dock ${statusText}`);
         }
     }
 
@@ -486,14 +504,15 @@ export default class AdaptiveDock extends Extension {
 
         const shouldNotify = this._kb ? this._kb.get_boolean('notify-on-workspace-toggle') : true;
         if (shouldNotify) {
+            const wsIcon = this._getWorkspaceIcon();
             if (hasExplicitPersistentRule) {
                 const appStateText = appRule === 'show' ? 'Always Shown' : 'Always Hidden';
-                this._showOsd('video-display-symbolic', `Workspace: ${nextShow ? 'Shown' : 'Hidden'} (App: ${appStateText})`);
+                this._showOsd(wsIcon, `${wsName}: Dock ${nextShow ? 'Shown' : 'Hidden'} (App: ${appStateText})`);
             } else if (appRule === 'bypass') {
-                this._showOsd('video-display-symbolic', `Workspace: ${nextShow ? 'Shown' : 'Hidden'} (App: Bypass)`);
+                this._showOsd(wsIcon, `${wsName}: Dock ${nextShow ? 'Shown' : 'Hidden'} (App: Bypass)`);
             } else {
                 const statusText = nextShow ? 'Shown' : 'Hidden';
-                this._showOsd('video-display-symbolic', `Dock: ${statusText} (Workspace: ${wsName})`);
+                this._showOsd(wsIcon, `${wsName}: Dock ${statusText}`);
             }
         }
     }

@@ -57,9 +57,19 @@
       <description>Show on-screen display notification when toggling workspace dock baseline.</description>
     </key>
     <key name="notification-vertical-offset" type="i">
-      <default>80</default>
+      <default>0</default>
       <summary>Notification bottom offset (px)</summary>
-      <description>Vertical distance in pixels to elevate the notification above bottom docks.</description>
+      <description>Vertical distance in pixels to elevate the notification above bottom docks (0 for native system placement).</description>
+    </key>
+    <key name="osd-app-icon-style" type="s">
+      <default>'eye'</default>
+      <summary>OSD App Toggle icon style</summary>
+      <description>Icon pair style for app toggle notifications: 'eye' (reveal/conceal) or 'window' (focus/minimize).</description>
+    </key>
+    <key name="osd-workspace-icon-style" type="s">
+      <default>'display'</default>
+      <summary>OSD Workspace Toggle icon style</summary>
+      <description>Icon style for workspace baseline toggle notifications: 'display', 'grid', 'multitasking', or 'wallpaper'.</description>
     </key>
   </schema>
 </schemalist>
