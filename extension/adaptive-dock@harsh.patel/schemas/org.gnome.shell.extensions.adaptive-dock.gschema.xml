@@ -76,5 +76,30 @@
       <summary>OSD Workspace Toggle icon style</summary>
       <description>Icon style for workspace baseline toggle notifications: 'display', 'grid', or 'multitasking'.</description>
     </key>
+    <key name="default-workspace-state" type="s">
+      <default>'show'</default>
+      <summary>Default workspace dock behavior</summary>
+      <description>Baseline dock behavior for workspaces that have no custom rule ('show' or 'hide').</description>
+    </key>
+    <key name="persist-app-shortcut-state" type="b">
+      <default>false</default>
+      <summary>Persist app shortcut toggles across sessions</summary>
+      <description>When true, app shortcut overrides save to disk so app rules survive reboots. Per-window overrides remain session-only.</description>
+    </key>
+    <key name="persist-workspace-shortcut-state" type="b">
+      <default>false</default>
+      <summary>Persist workspace shortcut toggles across sessions</summary>
+      <description>When true, workspace shortcut overrides save to disk so workspace rules survive reboots.</description>
+    </key>
+    <key name="integrate-space-bar" type="b">
+      <default>true</default>
+      <summary>Integrate dock toggle into Space Bar menu</summary>
+      <description>When true and the Space Bar extension is active, adds a dock toggle action to the Space Bar workspace menu.</description>
+    </key>
+    <key name="per-monitor-isolation" type="b">
+      <default>true</default>
+      <summary>Per-monitor dock isolation</summary>
+      <description>When true, dock visibility rules, shortcuts, session state, and OSD notifications are isolated per monitor.</description>
+    </key>
   </schema>
 </schemalist>

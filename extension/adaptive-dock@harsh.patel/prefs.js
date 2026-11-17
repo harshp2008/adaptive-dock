@@ -7,14 +7,64 @@ import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/ex
 
 const CFG = GLib.get_user_config_dir();
 const APP_STATES = GLib.build_filenamev([CFG, 'dock-app-states.json']);
+const MONITOR_APP_STATES = GLib.build_filenamev([CFG, 'dock-monitor-app-states.json']);
 const WS_DIR = GLib.build_filenamev([CFG, 'dock-workspace-states']);
 const WS_CHOICES = ['Default', 'Show dock', 'Hide dock'];
-const APP_CHOICES = ['Default', 'Show dock', 'Hide dock', 'Bypass'];
+const APP_CHOICES = ['Inherit', 'Show dock', 'Hide dock', 'Bypass'];
 const CHOICES = WS_CHOICES;
 const DOCK_SCHEMAS = ['org.gnome.shell.extensions.dash-to-dock', 'org.gnome.shell.extensions.ubuntu-dock'];
 
 function sanitizeWsName(name) {
     return (name || '').replace(/[\/\0]/g, '-').trim();
+}
+
+function getConnectedMonitors() {
+    try {
+        const bus = Gio.bus_get_sync(Gio.BusType.SESSION, null);
+        const res = bus.call_sync(
+            'org.gnome.Mutter.DisplayConfig',
+            '/org/gnome/Mutter/DisplayConfig',
+            'org.gnome.Mutter.DisplayConfig',
+            'GetCurrentState',
+            null,
+            null,
+            Gio.DBusCallFlags.NONE,
+            -1,
+            null
+        );
+        const [_serial, monitors, logicalMonitors] = res.recursiveUnpack();
+        const results = [];
+        const names = new Map();
+
+        for (const m of monitors) {
+            const [specs, _modes, props] = m;
+            const connector = specs[0];
+            const name = props['display-name'] ? props['display-name'].unpack() : connector;
+            names.set(connector, name);
+        }
+
+        for (const lm of logicalMonitors) {
+            const [_x, _y, _scale, _transform, isPrimary, specs] = lm;
+            const connector = specs?.[0]?.[0];
+            if (connector) {
+                const displayName = names.get(connector) || connector;
+                results.push({
+                    connector,
+                    displayName,
+                    isPrimary: Boolean(isPrimary),
+                    label: isPrimary ? `${displayName} (${connector}) — Primary` : `${displayName} (${connector})`,
+                });
+            }
+        }
+        if (results.length > 0) return results;
+    } catch (_e) {}
+
+    return [{
+        connector: 'default',
+        displayName: 'Default Display',
+        isPrimary: true,
+        label: 'Default Display',
+    }];
 }
 
 function readApps() {
@@ -31,6 +81,34 @@ function writeApps(states) {
     GLib.file_set_contents(APP_STATES, JSON.stringify(states, null, 2));
 }
 
+function readMonitorApps(connector) {
+    if (!connector) return readApps();
+    try {
+        const [ok, bytes] = Gio.File.new_for_path(MONITOR_APP_STATES).load_contents(null);
+        if (!ok) return readApps();
+        const doc = JSON.parse(new TextDecoder().decode(bytes));
+        return doc.monitors?.[connector] || {};
+    } catch (_e) {
+        return readApps();
+    }
+}
+
+function writeMonitorApps(connector, states) {
+    if (!connector) {
+        writeApps(states);
+        return;
+    }
+    GLib.mkdir_with_parents(CFG, 0o755);
+    let doc = { version: 1, monitors: {} };
+    try {
+        const [ok, bytes] = Gio.File.new_for_path(MONITOR_APP_STATES).load_contents(null);
+        if (ok) doc = JSON.parse(new TextDecoder().decode(bytes));
+    } catch (_e) {}
+    if (!doc.monitors) doc.monitors = {};
+    doc.monitors[connector] = states;
+    GLib.file_set_contents(MONITOR_APP_STATES, JSON.stringify(doc, null, 2));
+}
+
 function readWs(name) {
     try {
         const safe = sanitizeWsName(name);
@@ -45,6 +123,39 @@ function writeWs(name, value) {
     GLib.mkdir_with_parents(WS_DIR, 0o755);
     const safe = sanitizeWsName(name);
     const path = GLib.build_filenamev([WS_DIR, `${safe}.state`]);
+    if (value === null) {
+        try {
+            Gio.File.new_for_path(path).delete(null);
+        } catch (_e) {}
+    } else {
+        GLib.file_set_contents(path, value);
+    }
+}
+
+function readMonitorWs(connector, name) {
+    if (!connector) return readWs(name);
+    try {
+        const safe = sanitizeWsName(name);
+        const perMonPath = GLib.build_filenamev([WS_DIR, connector, `${safe}.state`]);
+        if (GLib.file_test(perMonPath, GLib.FileTest.EXISTS)) {
+            const [ok, bytes] = Gio.File.new_for_path(perMonPath).load_contents(null);
+            return ok ? new TextDecoder().decode(bytes).trim() : null;
+        }
+        return readWs(name);
+    } catch (_e) {
+        return readWs(name);
+    }
+}
+
+function writeMonitorWs(connector, name, value) {
+    if (!connector) {
+        writeWs(name, value);
+        return;
+    }
+    const safe = sanitizeWsName(name);
+    const dir = GLib.build_filenamev([WS_DIR, connector]);
+    GLib.mkdir_with_parents(dir, 0o755);
+    const path = GLib.build_filenamev([dir, `${safe}.state`]);
     if (value === null) {
         try {
             Gio.File.new_for_path(path).delete(null);
@@ -219,8 +330,8 @@ function openRenameWorkspaceDialog(parentWindow, wm, oldName, index, onRenamed) 
         modal: true,
         transient_for: parentWindow,
         title: 'Rename Workspace',
-        width_request: 380,
-        height_request: 200,
+        width_request: 360,
+        height_request: 180,
     });
 
     const tbv = new Adw.ToolbarView();
@@ -250,6 +361,7 @@ function openRenameWorkspaceDialog(parentWindow, wm, oldName, index, onRenamed) 
     });
     entryRow.set_activates_default(true);
     group.add(entryRow);
+
     clamp.set_child(group);
     tbv.set_content(clamp);
     dialog.set_content(tbv);
@@ -628,7 +740,7 @@ export default class Prefs extends ExtensionPreferences {
         // Dock Placement & Size group
         if (dockSettings) {
             const placementGroup = new Adw.PreferencesGroup({
-                title: 'Dock Placement & Size',
+                title: 'Dock Placement and Size',
                 description: 'Configure dock screen position and icon sizing.',
             });
 
@@ -688,7 +800,7 @@ export default class Prefs extends ExtensionPreferences {
 
             // Screen Edge Autohide & Reveal group
             const edgeGroup = new Adw.PreferencesGroup({
-                title: 'Screen Edge Autohide & Reveal',
+                title: 'Screen Edge Autohide and Reveal',
                 description: 'Configure how the dock reveals itself when moving cursor to screen edge.',
             });
 
@@ -799,6 +911,22 @@ export default class Prefs extends ExtensionPreferences {
             genPage.add(edgeGroup);
         }
 
+        // Multi-Monitor Isolation group
+        const multiMonGroup = new Adw.PreferencesGroup({
+            title: 'Multi-Monitor Behavior',
+            description: 'Control whether dock visibility, session memory, shortcuts, and notifications operate independently on each display.',
+        });
+
+        const isolationRow = new Adw.SwitchRow({
+            title: 'Per-Monitor Isolation',
+            subtitle: 'Isolate dock visibility rules, shortcuts, session overrides, and OSD notifications per monitor',
+            active: settings.get_boolean('per-monitor-isolation'),
+        });
+        settings.bind('per-monitor-isolation', isolationRow, 'active', Gio.SettingsBindFlags.DEFAULT);
+        multiMonGroup.add(isolationRow);
+
+        genPage.add(multiMonGroup);
+
         window.add(genPage);
 
         // ---- Apps page ----
@@ -806,6 +934,47 @@ export default class Prefs extends ExtensionPreferences {
         const allApps = Gio.AppInfo.get_all()
             .filter(a => a.should_show())
             .sort((a, b) => a.get_display_name().localeCompare(b.get_display_name()));
+
+        const connectedMonitors = getConnectedMonitors();
+        let selectedAppConnector = connectedMonitors.find(m => m.isPrimary)?.connector || connectedMonitors[0]?.connector || null;
+
+        const getActiveAppConnector = () => {
+            return settings.get_boolean('per-monitor-isolation') ? selectedAppConnector : null;
+        };
+
+        const appMonitorGroup = new Adw.PreferencesGroup({
+            title: 'Display Scope',
+            description: 'Select the display for which application dock rules apply.',
+        });
+        const appMonitorModel = Gtk.StringList.new(connectedMonitors.map(m => m.label));
+        const appMonitorCombo = new Adw.ComboRow({
+            title: 'Configuring Display',
+            model: appMonitorModel,
+        });
+        const primaryAppMonIdx = connectedMonitors.findIndex(m => m.isPrimary);
+        appMonitorCombo.selected = primaryAppMonIdx >= 0 ? primaryAppMonIdx : 0;
+        appMonitorGroup.add(appMonitorCombo);
+        appsPage.add(appMonitorGroup);
+
+        const appRowDropdownUpdaters = [];
+
+        const updateAppMonitorGroupVisibility = () => {
+            const isolated = settings.get_boolean('per-monitor-isolation');
+            appMonitorGroup.visible = isolated && (connectedMonitors.length > 1);
+        };
+        settings.connect('changed::per-monitor-isolation', () => {
+            updateAppMonitorGroupVisibility();
+            for (const updater of appRowDropdownUpdaters) updater();
+        });
+        updateAppMonitorGroupVisibility();
+
+        appMonitorCombo.connect('notify::selected', () => {
+            const mon = connectedMonitors[appMonitorCombo.selected];
+            if (mon) {
+                selectedAppConnector = mon.connector;
+                for (const updater of appRowDropdownUpdaters) updater();
+            }
+        });
 
         // Session Memory group
         const sessionGroup = new Adw.PreferencesGroup({
@@ -815,15 +984,24 @@ export default class Prefs extends ExtensionPreferences {
 
         const rememberRow = new Adw.SwitchRow({
             title: 'Remember manual dock state in current session',
-            subtitle: 'Keep dock visible or hidden after toggling with shortcut until log out',
+            subtitle: 'Retain manual shortcut visibility until logout',
             active: settings.get_boolean('remember-session-state'),
         });
         settings.bind('remember-session-state', rememberRow, 'active', Gio.SettingsBindFlags.DEFAULT);
         sessionGroup.add(rememberRow);
 
+        const persistRow = new Adw.SwitchRow({
+            title: 'Persist App Shortcut Toggles',
+            subtitle: 'Save Shift+Super+D changes to disk across reboots',
+            active: settings.get_boolean('persist-app-shortcut-state'),
+        });
+        settings.bind('persist-app-shortcut-state', persistRow, 'active', Gio.SettingsBindFlags.DEFAULT);
+        settings.bind('remember-session-state', persistRow, 'sensitive', Gio.SettingsBindFlags.GET);
+        sessionGroup.add(persistRow);
+
         const perWindowRow = new Adw.SwitchRow({
             title: 'Isolate state per window by default',
-            subtitle: 'Apply shortcut toggle to active window only (individual apps can override below)',
+            subtitle: 'Apply shortcut toggle to active window only',
             active: settings.get_boolean('remember-per-window'),
         });
         settings.bind('remember-per-window', perWindowRow, 'active', Gio.SettingsBindFlags.DEFAULT);
@@ -840,7 +1018,6 @@ export default class Prefs extends ExtensionPreferences {
 
         const addOverrideActionRow = new Adw.ActionRow({
             title: 'Add app override…',
-            subtitle: 'Choose an app to set an isolation rule (e.g. Gemini)',
             activatable: true,
         });
         const addOverrideBtn = new Gtk.Button({
@@ -950,11 +1127,9 @@ export default class Prefs extends ExtensionPreferences {
         // Per-app dock behaviour group
         const appsGroup = new Adw.PreferencesGroup({
             title: 'Per-app dock behaviour',
-            description: 'Overrides workspace settings. Choose "Bypass" to preserve dock state (e.g. for clipboards and floating utilities).',
+            description: 'Set dock visibility per app. "Inherit" follows the workspace rule. "Bypass" leaves the existing dock state untouched when this app gains focus.',
         });
         appsPage.add(appsGroup);
-
-        const states = readApps();
 
         for (const app of allApps) {
             const id = (app.get_id() ?? '').replace(/\.desktop$/, '');
@@ -964,6 +1139,8 @@ export default class Prefs extends ExtensionPreferences {
                 title: GLib.markup_escape_text(app.get_display_name(), -1),
                 subtitle: id,
             });
+            row.set_title_lines(1);
+            row.set_subtitle_lines(1);
 
             const icon = app.get_icon();
             if (icon) row.add_prefix(new Gtk.Image({gicon: icon, pixel_size: 32}));
@@ -1017,17 +1194,29 @@ export default class Prefs extends ExtensionPreferences {
                 model: Gtk.StringList.new(APP_CHOICES),
                 valign: Gtk.Align.CENTER,
             });
-            dockDropDown.selected = (states[id] === 'show' || states[id] === 'true') ? 1
-                : (states[id] === 'hide' || states[id] === 'false') ? 2
-                : states[id] === 'bypass' ? 3
-                : 0;
+            dockDropDown.set_size_request(130, -1);
+
+            const refreshAppDropDown = () => {
+                const conn = getActiveAppConnector();
+                const cur = conn ? readMonitorApps(conn) : readApps();
+                dockDropDown.selected = (cur[id] === 'show' || cur[id] === 'true') ? 1
+                    : (cur[id] === 'hide' || cur[id] === 'false') ? 2
+                    : cur[id] === 'bypass' ? 3
+                    : 0;
+            };
+            appRowDropdownUpdaters.push(refreshAppDropDown);
+            refreshAppDropDown();
+
             dockDropDown.connect('notify::selected', () => {
-                const cur = readApps();
+                const conn = getActiveAppConnector();
+                const cur = conn ? readMonitorApps(conn) : readApps();
                 if (dockDropDown.selected === 1) cur[id] = 'show';
                 else if (dockDropDown.selected === 2) cur[id] = 'hide';
                 else if (dockDropDown.selected === 3) cur[id] = 'bypass';
                 else delete cur[id];
-                writeApps(cur);
+
+                if (conn) writeMonitorApps(conn, cur);
+                else writeApps(cur);
             });
             row.add_suffix(dockDropDown);
 
@@ -1037,19 +1226,113 @@ export default class Prefs extends ExtensionPreferences {
 
         // ---- Workspaces page ----
         const wsPage = new Adw.PreferencesPage({title: 'Workspaces', icon_name: 'preferences-desktop-apps-symbolic'});
+
+        let selectedWsConnector = connectedMonitors.find(m => m.isPrimary)?.connector || connectedMonitors[0]?.connector || null;
+
+        const getActiveWsConnector = () => {
+            return settings.get_boolean('per-monitor-isolation') ? selectedWsConnector : null;
+        };
+
+        const wsMonitorGroup = new Adw.PreferencesGroup({
+            title: 'Display Scope',
+            description: 'Select the display for which workspace dock baselines apply.',
+        });
+        const wsMonitorModel = Gtk.StringList.new(connectedMonitors.map(m => m.label));
+        const wsMonitorCombo = new Adw.ComboRow({
+            title: 'Configuring Display',
+            model: wsMonitorModel,
+        });
+        const primaryWsMonIdx = connectedMonitors.findIndex(m => m.isPrimary);
+        wsMonitorCombo.selected = primaryWsMonIdx >= 0 ? primaryWsMonIdx : 0;
+        wsMonitorGroup.add(wsMonitorCombo);
+        wsPage.add(wsMonitorGroup);
+
+        const updateWsMonitorGroupVisibility = () => {
+            const isolated = settings.get_boolean('per-monitor-isolation');
+            wsMonitorGroup.visible = isolated && (connectedMonitors.length > 1);
+        };
+        settings.connect('changed::per-monitor-isolation', () => {
+            updateWsMonitorGroupVisibility();
+            syncWorkspaces();
+        });
+        updateWsMonitorGroupVisibility();
+
+        wsMonitorCombo.connect('notify::selected', () => {
+            const mon = connectedMonitors[wsMonitorCombo.selected];
+            if (mon) {
+                selectedWsConnector = mon.connector;
+                syncWorkspaces();
+            }
+        });
+
+        const wsConfigGroup = new Adw.PreferencesGroup({
+            title: 'Workspaces',
+            description: 'Configure default and per-workspace dock visibility.',
+        });
+        wsPage.add(wsConfigGroup);
+
+        const defaultWsRow = new Adw.ActionRow({
+            title: 'Default Dock Behavior',
+            subtitle: 'Applied to workspaces without custom rules',
+        });
+        const defaultWsDrop = new Gtk.DropDown({
+            model: Gtk.StringList.new(['Show dock', 'Hide dock']),
+            valign: Gtk.Align.CENTER,
+        });
+        defaultWsDrop.set_size_request(130, -1);
+        defaultWsDrop.selected = (settings.get_string('default-workspace-state') === 'hide') ? 1 : 0;
+        defaultWsDrop.connect('notify::selected', () => {
+            settings.set_string('default-workspace-state', defaultWsDrop.selected === 1 ? 'hide' : 'show');
+        });
+        defaultWsRow.add_suffix(defaultWsDrop);
+        wsConfigGroup.add(defaultWsRow);
+
+        const persistWsRow = new Adw.SwitchRow({
+            title: 'Persist Workspace Shortcut Toggles',
+            subtitle: 'Save Shift+Super+W changes to disk across reboots',
+            active: settings.get_boolean('persist-workspace-shortcut-state'),
+        });
+        settings.bind('persist-workspace-shortcut-state', persistWsRow, 'active', Gio.SettingsBindFlags.DEFAULT);
+        settings.bind('remember-session-state', persistWsRow, 'sensitive', Gio.SettingsBindFlags.GET);
+        wsConfigGroup.add(persistWsRow);
+
+        const spaceBarRow = new Adw.SwitchRow({
+            title: 'Space Bar Menu Integration',
+            subtitle: 'Add dock toggle to Space Bar workspace popup menu (if installed)',
+            active: settings.get_boolean('integrate-space-bar'),
+        });
+        settings.bind('integrate-space-bar', spaceBarRow, 'active', Gio.SettingsBindFlags.DEFAULT);
+        wsConfigGroup.add(spaceBarRow);
+
         const wsGroup = new Adw.PreferencesGroup({
-            title: 'Per-workspace dock behaviour',
-            description: 'Used when the focused app has no override. Click "+" to add a workspace or ✏️ to rename.',
+            title: 'Workspace Rules',
+            description: 'Custom overrides for specific workspaces. Click the edit icon to rename.',
         });
         wsPage.add(wsGroup);
 
+        const headerBox = new Gtk.Box({
+            orientation: Gtk.Orientation.HORIZONTAL,
+            spacing: 6,
+            valign: Gtk.Align.CENTER,
+        });
+
+        const removeLastWsBtn = new Gtk.Button({
+            icon_name: 'list-remove-symbolic',
+            has_frame: true,
+            valign: Gtk.Align.CENTER,
+            tooltip_text: 'Remove last workspace',
+        });
+
         const addWsBtn = new Gtk.Button({
             icon_name: 'list-add-symbolic',
-            css_classes: ['flat'],
+            has_frame: true,
             valign: Gtk.Align.CENTER,
-            tooltip_text: 'Add new workspace',
+            tooltip_text: 'Add workspace',
         });
-        wsGroup.set_header_suffix(addWsBtn);
+
+        headerBox.append(removeLastWsBtn);
+        headerBox.append(addWsBtn);
+        wsGroup.set_header_suffix(headerBox);
 
         const wm = new Gio.Settings({schema_id: 'org.gnome.desktop.wm.preferences'});
         let currentWsList = [];
@@ -1073,6 +1356,11 @@ export default class Prefs extends ExtensionPreferences {
             }
             wsRows = [];
             currentWsList = effectiveList;
+
+            // Only enable remove button if there are more than 4 workspaces
+            removeLastWsBtn.sensitive = (effectiveList.length > 4);
+
+            const activeWsConn = getActiveWsConnector();
 
             // Rebuild rows in clean sequential order
             for (let i = 0; i < effectiveList.length; i++) {
@@ -1108,36 +1396,25 @@ export default class Prefs extends ExtensionPreferences {
                     model: Gtk.StringList.new(WS_CHOICES),
                     valign: Gtk.Align.CENTER,
                 });
-                const cur = readWs(name);
+                dockDropDown.set_size_request(130, -1);
+                const cur = activeWsConn ? readMonitorWs(activeWsConn, name) : readWs(name);
                 dockDropDown.selected = (cur === 'true' || cur === 'show') ? 1
                     : (cur === 'false' || cur === 'hide') ? 2
                     : 0;
                 dockDropDown.connect('notify::selected', () => {
-                    if (dockDropDown.selected === 1) writeWs(name, 'show');
-                    else if (dockDropDown.selected === 2) writeWs(name, 'hide');
-                    else writeWs(name, null);
+                    const connNow = getActiveWsConnector();
+                    if (dockDropDown.selected === 1) {
+                        if (connNow) writeMonitorWs(connNow, name, 'show');
+                        else writeWs(name, 'show');
+                    } else if (dockDropDown.selected === 2) {
+                        if (connNow) writeMonitorWs(connNow, name, 'hide');
+                        else writeWs(name, 'hide');
+                    } else {
+                        if (connNow) writeMonitorWs(connNow, name, null);
+                        else writeWs(name, null);
+                    }
                 });
                 row.add_suffix(dockDropDown);
-
-                // Delete button for extra workspaces
-                if (i >= 4) {
-                    const delWsBtn = new Gtk.Button({
-                        icon_name: 'user-trash-symbolic',
-                        has_frame: false,
-                        valign: Gtk.Align.CENTER,
-                        tooltip_text: `Remove "${name}"`,
-                    });
-                    delWsBtn.connect('clicked', () => {
-                        const curWmNames = wm.get_strv('workspace-names') || [];
-                        if (curWmNames.length > i) {
-                            curWmNames.splice(i, 1);
-                            wm.set_strv('workspace-names', curWmNames);
-                        }
-                        writeWs(name, null);
-                        syncWorkspaces();
-                    });
-                    row.add_suffix(delWsBtn);
-                }
 
                 wsGroup.add(row);
                 wsRows.push(row);
@@ -1148,6 +1425,38 @@ export default class Prefs extends ExtensionPreferences {
             openAddWorkspaceDialog(window, wm, settings, currentWsList.length, () => {
                 syncWorkspaces();
             });
+        });
+
+        removeLastWsBtn.connect('clicked', () => {
+            if (currentWsList.length <= 4) return;
+            const lastIdx = currentWsList.length - 1;
+            const lastName = currentWsList[lastIdx];
+
+            // 1. Remove state file if present
+            const connNow = getActiveWsConnector();
+            if (connNow) writeMonitorWs(connNow, lastName, null);
+            writeWs(lastName, null);
+
+            // 2. Pop from workspace-names
+            const curWmNames = wm.get_strv('workspace-names') || [];
+            if (curWmNames.length > lastIdx) {
+                curWmNames.splice(lastIdx, 1);
+                wm.set_strv('workspace-names', curWmNames);
+            }
+
+            // 3. Decrement workspace count if static
+            try {
+                const mutterSettings = new Gio.Settings({schema_id: 'org.gnome.mutter'});
+                if (!mutterSettings.get_boolean('dynamic-workspaces')) {
+                    const count = wm.get_int('num-workspaces');
+                    if (count > 4) wm.set_int('num-workspaces', count - 1);
+                }
+            } catch (_e) {}
+
+            // 4. Update workspace-list in GSettings
+            const updatedList = currentWsList.slice(0, lastIdx);
+            settings.set_strv('workspace-list', updatedList);
+            syncWorkspaces();
         });
 
         syncWorkspaces();
